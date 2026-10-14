@@ -18,15 +18,22 @@
 // гладкая (1 - x^2) e^x, осцилляции sin(4 pi x) и f = sin x с точным решением
 // (cot(1) sin x - x cos x) / 2.
 //
-// Вывод: нормы ошибки C, C1, L1, L2 и график точного и численного решений.
+// Вывод: нормы ошибки C, C1, L1, L2 и три графика:
+//   * точное и численное решения для гауссова пика (N = 36);
+//   * сходимость норм C и L2 по N = 2..24 на гладких решениях (1 - x^2) e^x и задаче
+//     с f = sin x: экспоненциальное убывание до машинной точности примерно при N = 16;
+//   * поточечная ошибка |u - u_N| при N = 4, 8, 12, 16.
 // Замечание: на отрезке длины k*pi задача резонансная, и матрица системы вырождена.
 
 #include <cmath>
 #include <cstdio>
+#include <functional>
 #include <iostream>
+#include <limits>
 #include <ostream>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "sem/analysis/error_norms.hpp"
 #include "sem/basis/quadrature.hpp"
@@ -35,37 +42,12 @@
 #include "sem/io/plot.hpp"
 
 
-// Запуск с флагом --no-show только сохраняет картинку, без окна.
-int main(int argc, char **argv) {
-    const bool showWindow = !(argc > 1 && std::string_view(argv[1]) == "--no-show");
-
-    const int N = 36; //degree
-    // const sem::Real cot1 = std::cos(1.0) / std::sin(1.0);
-    // const auto f = [](sem::Real x) { return std::sin(x); };
-    // const auto u = [cot1](sem::Real x) { return (cot1 * std::sin(x) - x * std::cos(x)) / 2; };
-    // const auto du = [cot1](sem::Real x) { return ((cot1 - 1) * std::cos(x) + x * std::sin(x)) / 2; };
-
-    // const sem::Real kw = 4 * std::numbers::pi;
-    // const auto f = [kw](sem::Real x) { return (1 - kw * kw) * std::sin(kw * x); };
-    // const auto u = [kw](sem::Real x) { return std::sin(kw * x); };
-    // const auto du = [kw](sem::Real x) { return kw * std::cos(kw * x); };
-
-    // const auto f = [](sem::Real x) { return -2 * x * (2 + x) * std::exp(x); };
-    // const auto u = [](sem::Real x) { return (1 - x * x) * std::exp(x); };
-    // const auto du = [](sem::Real x) { return (1 - 2 * x - x * x) * std::exp(x); };
-
-    const sem::Real beta = 50, x0 = 0.3;
-    const auto g = [=](sem::Real x) { return std::exp(-beta * (x - x0) * (x - x0)); };
-    const sem::Real gp = g(1), gm = g(-1);
-    const auto lin = [=](sem::Real x) { return (gp * (1 + x) + gm * (1 - x)) / 2; };
-
-    const auto u = [=](sem::Real x) { return g(x) - lin(x); };
-    const auto du = [=](sem::Real x) { return -2 * beta * (x - x0) * g(x) - (gp - gm) / 2; };
-    const auto f = [=](sem::Real x) {
-        return (4 * beta * beta * (x - x0) * (x - x0) - 2 * beta) * g(x) + u(x); // g'' + u
-    };
-
-    auto basis = sem::SpectralBasis1D(N);
+// Решение u'' + u = f, u(±1) = 0 на одном элементе степени N (метод Галёркина, квадратура GLL):
+//   (D^T W D - W) u = -W f,  строки 0 и N заменены уравнениями u_0 = 0, u_N = 0.
+// Возвращает узловые значения решения.
+template<class F>
+std::vector<sem::Real> solveHelmholtz(const sem::SpectralBasis1D &basis, F &&f) {
+    const int N = basis.degree();
     const int n = basis.numPoints();
     auto weights = basis.weights();
     auto points = basis.points();
@@ -97,7 +79,48 @@ int main(int argc, char **argv) {
         b[k] = 0;
     }
 
-    const auto coeff = sem::solveGauss(A, b);
+    return sem::solveGauss(A, b);
+}
+
+// Тестовая задача: правая часть f, точное решение u и его производная du.
+struct TestProblem {
+    std::string name; // подпись для графика (TeX)
+    std::function<sem::Real(sem::Real)> f, u, du;
+};
+
+// Запуск с флагом --no-show только сохраняет картинки, без окон.
+int main(int argc, char **argv) {
+    const bool showWindow = !(argc > 1 && std::string_view(argv[1]) == "--no-show");
+
+    const int N = 36; //degree
+    // const sem::Real cot1 = std::cos(1.0) / std::sin(1.0);
+    // const auto f = [](sem::Real x) { return std::sin(x); };
+    // const auto u = [cot1](sem::Real x) { return (cot1 * std::sin(x) - x * std::cos(x)) / 2; };
+    // const auto du = [cot1](sem::Real x) { return ((cot1 - 1) * std::cos(x) + x * std::sin(x)) / 2; };
+
+    // const sem::Real kw = 4 * std::numbers::pi;
+    // const auto f = [kw](sem::Real x) { return (1 - kw * kw) * std::sin(kw * x); };
+    // const auto u = [kw](sem::Real x) { return std::sin(kw * x); };
+    // const auto du = [kw](sem::Real x) { return kw * std::cos(kw * x); };
+
+    // const auto f = [](sem::Real x) { return -2 * x * (2 + x) * std::exp(x); };
+    // const auto u = [](sem::Real x) { return (1 - x * x) * std::exp(x); };
+    // const auto du = [](sem::Real x) { return (1 - 2 * x - x * x) * std::exp(x); };
+
+    const sem::Real beta = 50, x0 = 0.3;
+    const auto g = [=](sem::Real x) { return std::exp(-beta * (x - x0) * (x - x0)); };
+    const sem::Real gp = g(1), gm = g(-1);
+    const auto lin = [=](sem::Real x) { return (gp * (1 + x) + gm * (1 - x)) / 2; };
+
+    const auto u = [=](sem::Real x) { return g(x) - lin(x); };
+    const auto du = [=](sem::Real x) { return -2 * beta * (x - x0) * g(x) - (gp - gm) / 2; };
+    const auto f = [=](sem::Real x) {
+        return (4 * beta * beta * (x - x0) * (x - x0) - 2 * beta) * g(x) + u(x); // g'' + u
+    };
+
+    // 1. Узкий гауссов пик при N = 36: решение и узлы.
+    auto basis = sem::SpectralBasis1D(N);
+    const auto coeff = solveHelmholtz(basis, f);
 
     // auto u_approximation = [&basis, &coeff](sem::Real x) -> sem::Real {
     //     sem::Real res = 0;
@@ -126,7 +149,73 @@ int main(int argc, char **argv) {
     fig.plotFunction(u, -1, 1, 400, "exact solution", "-"); // функция на равномерной сетке
     fig.plotFunction(u_approximation, -1, 1, 400, "SEM solution", "--");
     fig.plot(basis.points(), coeff, "GLL nodes", "o"); // точки (x, y)
-    fig.render("helmholtz_1d.json", {.image = "helmholtz_1d.png", .showWindow = showWindow});
+
+    // 2. Сходимость на гладких решениях: ошибка падает экспоненциально и примерно при N = 16
+    //    упирается в машинную точность — дальше её ограничивает только округление.
+    const sem::Real cot1 = std::cos(1.0) / std::sin(1.0);
+    const std::vector<TestProblem> smooth{
+        {
+            R"($u = (1 - x^2)\,e^{x}$)",
+            [](sem::Real x) { return -2 * x * (2 + x) * std::exp(x); },
+            [](sem::Real x) { return (1 - x * x) * std::exp(x); },
+            [](sem::Real x) { return (1 - 2 * x - x * x) * std::exp(x); }
+        },
+        {
+            R"($f = \sin x$)",
+            [](sem::Real x) { return std::sin(x); },
+            [cot1](sem::Real x) { return (cot1 * std::sin(x) - x * std::cos(x)) / 2; },
+            [cot1](sem::Real x) { return ((cot1 - 1) * std::cos(x) + x * std::sin(x)) / 2; }
+        },
+    };
+    const std::vector<sem::Real> bpConv{-1, 1};
+
+    const int maxDegree = 24;
+    std::vector<sem::Real> degrees;
+    for (int N0 = 2; N0 <= maxDegree; ++N0) {
+        degrees.push_back(N0);
+    }
+
+    sem::io::Figure convergence(R"(Spectral convergence for $u'' + u = f$, $u(\pm 1) = 0$)");
+    convergence.setXLabel("degree $N$").setYLabel(R"(error norm of $u - u_N$)" "\n" "(logarithmic scale)")
+            .setYScale(sem::io::AxisScale::Log);
+
+    const char *markers[] = {"o", "s"};
+    for (std::size_t p = 0; p < smooth.size(); ++p) {
+        const TestProblem &problem = smooth[p];
+        std::vector<sem::Real> errorC, errorL2;
+        printf("\n%s\n  N           C          L2\n", problem.name.c_str());
+        for (const sem::Real N0: degrees) {
+            const sem::SpectralBasis1D b0(static_cast<int>(N0));
+            const auto c0 = solveHelmholtz(b0, problem.f);
+            const auto e = sem::analysis::errorNorms(b0, bpConv, c0, problem.u, problem.du);
+            errorC.push_back(e.c);
+            errorL2.push_back(e.l2);
+            printf("%3d  %10.3e  %10.3e\n", static_cast<int>(N0), e.c, e.l2);
+        }
+        convergence.plot(degrees, errorL2, problem.name + R"(: $L^2$)", std::string(markers[p]) + "-")
+                .plot(degrees, errorC, problem.name + R"(: $C$)", std::string(markers[p]) + "--");
+    }
+    const std::vector<sem::Real> epsilon(degrees.size(), std::numeric_limits<sem::Real>::epsilon());
+    convergence.plot(degrees, epsilon, R"(machine $\varepsilon \approx 2.2 \cdot 10^{-16}$)", "k:");
+
+    // 3. Поточечная ошибка |u - u_N| для u = (1 - x^2) e^x: при N = 16 — уровень округления.
+    sem::io::Figure pointwise(R"(Pointwise error $|u - u_N|$ for $u = (1 - x^2)\,e^{x}$)");
+    pointwise.setXLabel("$x$").setYLabel(R"($|u - u_N|$ (logarithmic scale))")
+            .setYScale(sem::io::AxisScale::Log);
+    for (const int N0: {4, 8, 12, 16}) {
+        const sem::SpectralBasis1D b0(N0);
+        const auto c0 = solveHelmholtz(b0, smooth[0].f);
+        pointwise.plotFunction([&](sem::Real x) { return std::abs(smooth[0].u(x) - b0.evaluate(c0, x)); },
+                               -1, 1, 801, "$N = " + std::to_string(N0) + "$", "-");
+    }
+
+    // Все три графика одним запуском Python: окна открываются одновременно.
+    sem::io::renderAll(std::vector<sem::io::PlotItem>{
+                           {fig.toJson(), "helmholtz_1d.json", "helmholtz_1d.png"},
+                           {convergence.toJson(), "helmholtz_1d_convergence.json", "helmholtz_1d_convergence.png"},
+                           {pointwise.toJson(), "helmholtz_1d_pointwise_error.json", "helmholtz_1d_pointwise_error.png"}
+                       },
+                       showWindow);
 
     return 0;
 }
