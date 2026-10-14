@@ -72,20 +72,27 @@ std::string_view scaleName(AxisScale scale) {
     return scale == AxisScale::Log ? "log" : "linear";
 }
 
-int runPlotScript(const std::filesystem::path& dataFile, const RenderOptions& options) {
+// Запускает tools/plot.py для одного или нескольких графиков одним процессом:
+//   python plot.py data1.json data2.json ... --output img1 --output img2 ... [--no-show]
+// Картинка "-" означает «не сохранять». Все окна открываются одновременно.
+int runPlotScript(std::span<const PlotItem> items, bool showWindow) {
     const std::filesystem::path python(config::kPythonExecutable);
     const std::filesystem::path script(config::kPlotScript);
+    const std::filesystem::path noImage("-");
 
 #ifdef _WIN32
     // Широкие строки: пути с кириллицей не должны проходить через ANSI-кодировку.
     const auto quote = [](const std::filesystem::path& p) {
         return L"\"" + p.wstring() + L"\"";
     };
-    std::wstring command = quote(python) + L" " + quote(script) + L" " + quote(dataFile);
-    if (!options.image.empty()) {
-        command += L" --output " + quote(options.image);
+    std::wstring command = quote(python) + L" " + quote(script);
+    for (const PlotItem& item : items) {
+        command += L" " + quote(item.dataFile);
     }
-    if (!options.showWindow) {
+    for (const PlotItem& item : items) {
+        command += L" --output " + quote(item.image.empty() ? noImage : item.image);
+    }
+    if (!showWindow) {
         command += L" --no-show";
     }
     // cmd.exe /c снимает внешнюю пару кавычек, поэтому вся команда оборачивается ещё раз.
@@ -93,11 +100,14 @@ int runPlotScript(const std::filesystem::path& dataFile, const RenderOptions& op
     return _wsystem(command.c_str());
 #else
     const auto quote = [](const std::filesystem::path& p) { return "'" + p.string() + "'"; };
-    std::string command = quote(python) + " " + quote(script) + " " + quote(dataFile);
-    if (!options.image.empty()) {
-        command += " --output " + quote(options.image);
+    std::string command = quote(python) + " " + quote(script);
+    for (const PlotItem& item : items) {
+        command += " " + quote(item.dataFile);
     }
-    if (!options.showWindow) {
+    for (const PlotItem& item : items) {
+        command += " --output " + quote(item.image.empty() ? noImage : item.image);
+    }
+    if (!showWindow) {
         command += " --no-show";
     }
     return std::system(command.c_str());
@@ -115,22 +125,39 @@ void writeTextFile(const std::filesystem::path& path, const std::string& text, c
     }
 }
 
-// Общая часть render: проверка опций, запись JSON и запуск tools/plot.py.
-bool renderJson(const std::string& json, const std::filesystem::path& dataFile,
-                const RenderOptions& options, const char* who) {
-    if (!options.showWindow && options.image.empty()) {
+// Общая часть render и renderAll: проверки, запись JSON и запуск tools/plot.py.
+bool renderItems(std::span<const PlotItem> items, bool showWindow, const char* who) {
+    if (items.empty()) {
+        throw std::invalid_argument(std::string(who) + ": nothing to render");
+    }
+    bool anyImage = false;
+    for (const PlotItem& item : items) {
+        if (item.json.empty() || item.dataFile.empty()) {
+            throw std::invalid_argument(std::string(who) + ": every item needs json and a data file");
+        }
+        anyImage = anyImage || !item.image.empty();
+    }
+    if (!showWindow && !anyImage) {
         throw std::invalid_argument(
             std::string(who) + ": nothing to do, set an image path or enable the window");
     }
-    writeTextFile(dataFile, json, who);
+    for (const PlotItem& item : items) {
+        writeTextFile(item.dataFile, item.json, who);
+    }
 
-    const int status = runPlotScript(dataFile, options);
+    const int status = runPlotScript(items, showWindow);
     if (status != 0) {
         std::cerr << who << ": plot script failed (exit code " << status
                   << "). Check SEM_PYTHON_EXECUTABLE in CMake and that matplotlib is installed.\n";
         return false;
     }
     return true;
+}
+
+bool renderJson(const std::string& json, const std::filesystem::path& dataFile,
+                const RenderOptions& options, const char* who) {
+    const PlotItem item{json, dataFile, options.image};
+    return renderItems(std::span<const PlotItem>(&item, 1), options.showWindow, who);
 }
 
 std::string_view fieldStyleName(FieldStyle style) {
@@ -363,6 +390,10 @@ bool Figure2D::render(const std::filesystem::path& dataFile, const RenderOptions
         throw std::invalid_argument("Figure2D::render: no field data, call setField or setFunction");
     }
     return renderJson(toJson(), dataFile, options, "sem::io::Figure2D::render");
+}
+
+bool renderAll(std::span<const PlotItem> items, bool showWindow) {
+    return renderItems(items, showWindow, "sem::io::renderAll");
 }
 
 } // namespace sem::io

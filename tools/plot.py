@@ -5,6 +5,7 @@
     python tools/plot.py data.json                       # открыть окно
     python tools/plot.py data.json -o plot.png           # сохранить и открыть окно
     python tools/plot.py data.json -o plot.png --no-show # только сохранить
+    python tools/plot.py a.json b.json -o a.png -o -     # два окна сразу; b не сохранять
 
 Формат линейного графика (Figure):
     {
@@ -151,13 +152,20 @@ def draw_field(data, fig):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description="Draw a sem::io::Figure / Figure2D JSON file.")
-    parser.add_argument("data", type=Path, help="JSON file written by sem::io::Figure or Figure2D")
-    parser.add_argument("-o", "--output", type=Path, help="save the figure to this file")
-    parser.add_argument("--no-show", action="store_true", help="do not open a window")
+    parser = argparse.ArgumentParser(description="Draw sem::io::Figure / Figure2D JSON files.")
+    parser.add_argument("data", type=Path, nargs="+",
+                        help="JSON files written by sem::io::Figure or Figure2D")
+    parser.add_argument("-o", "--output", type=Path, action="append", default=[],
+                        help="image for the corresponding data file (in the same order); "
+                             "'-' means do not save")
+    parser.add_argument("--no-show", action="store_true", help="do not open windows")
     args = parser.parse_args(argv)
 
-    if args.no_show and args.output is None:
+    outputs = args.output
+    if outputs and len(outputs) != len(args.data):
+        parser.error("give either no --output or one --output per data file")
+    outputs = [None if out is None or str(out) == "-" else out for out in outputs] or [None] * len(args.data)
+    if args.no_show and all(out is None for out in outputs):
         parser.error("nothing to do: use --output or allow the window")
 
     import matplotlib
@@ -166,17 +174,19 @@ def main(argv=None):
         matplotlib.use("Agg")  # без окна: работает и без графической среды
     import matplotlib.pyplot as plt
 
-    data = load(args.data)
-    if data.get("kind") == "field2d":
-        fig = plt.figure(figsize=(8, 6.5), layout="constrained")
-        draw_field(data, fig)
-    else:
-        fig = plt.figure(figsize=(8, 5), layout="constrained")
-        draw_lines(data, fig)
+    # Каждый файл — отдельная фигура; plt.show() в конце открывает все окна сразу.
+    for path, output in zip(args.data, outputs):
+        data = load(path)
+        if data.get("kind") == "field2d":
+            fig = plt.figure(figsize=(8, 6.5), layout="constrained")
+            draw_field(data, fig)
+        else:
+            fig = plt.figure(figsize=(8, 5), layout="constrained")
+            draw_lines(data, fig)
+        if output is not None:
+            fig.savefig(output, dpi=150)
+            print(f"Saved {output}")
 
-    if args.output is not None:
-        fig.savefig(args.output, dpi=150)
-        print(f"Saved {args.output}")
     if not args.no_show:
         plt.show()
     return 0

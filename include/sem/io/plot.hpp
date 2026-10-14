@@ -20,6 +20,25 @@ struct RenderOptions {
     bool showWindow = true;       // окно matplotlib; программа ждёт, пока его не закроют
 };
 
+// Один график для renderAll: его JSON (toJson() у Figure или Figure2D), куда этот JSON
+// сохранить и куда сохранить картинку (пусто — не сохранять).
+struct PlotItem {
+    std::string           json;
+    std::filesystem::path dataFile;
+    std::filesystem::path image;
+};
+
+// Рисует несколько графиков одним запуском Python: все окна открываются одновременно,
+// и программа ждёт, пока их не закроют. (Отдельные вызовы render открывали бы окна
+// по очереди: следующее — только после закрытия предыдущего.)
+//
+//   sem::io::renderAll(std::vector<sem::io::PlotItem>{
+//       {logFigure.toJson(), "log.json", "log.png"},
+//       {linearFigure.toJson(), "linear.json", "linear.png"}});
+//
+// Возвращает true, если скрипт отработал без ошибок.
+bool renderAll(std::span<const PlotItem> items, bool showWindow = true);
+
 // Описание графика на стороне C++. Сам рисунок строит скрипт tools/plot.py
 // (matplotlib), данные передаются через JSON-файл. Поэтому сборка не зависит
 // от Python, а сохранённый JSON можно перерисовать без повторного расчёта:

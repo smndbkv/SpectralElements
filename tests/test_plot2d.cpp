@@ -79,6 +79,19 @@ TEST_CASE("Figure2D: field label and overlays", "[io][plot][plot2d]") {
     CHECK(contains(plain.toJson(), R"("overlays": [],)"));
 }
 
+TEST_CASE("renderAll: invalid arguments", "[io][plot]") {
+    using sem::io::PlotItem;
+    const std::vector<PlotItem> none;
+    CHECK_THROWS_AS(sem::io::renderAll(none), std::invalid_argument);
+
+    // Без окна и без картинок рисовать незачем.
+    const std::vector<PlotItem> noImages{{"{}", "a.json", {}}, {"{}", "b.json", {}}};
+    CHECK_THROWS_AS(sem::io::renderAll(noImages, false), std::invalid_argument);
+
+    const std::vector<PlotItem> noJson{{"", "a.json", "a.png"}};
+    CHECK_THROWS_AS(sem::io::renderAll(noJson, false), std::invalid_argument);
+}
+
 TEST_CASE("Figure2D: invalid arguments", "[io][plot][plot2d]") {
     const std::vector<Real> x{0, 1}, y{0, 1, 2}, one{0};
     Figure2D fig;
