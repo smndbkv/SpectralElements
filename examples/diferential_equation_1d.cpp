@@ -25,6 +25,8 @@
 #include <cstdio>
 #include <iostream>
 #include <ostream>
+#include <string>
+#include <string_view>
 
 #include "sem/analysis/error_norms.hpp"
 #include "sem/basis/quadrature.hpp"
@@ -33,7 +35,10 @@
 #include "sem/io/plot.hpp"
 
 
-int main() {
+// Запуск с флагом --no-show только сохраняет картинку, без окна.
+int main(int argc, char **argv) {
+    const bool showWindow = !(argc > 1 && std::string_view(argv[1]) == "--no-show");
+
     const int N = 36; //degree
     // const sem::Real cot1 = std::cos(1.0) / std::sin(1.0);
     // const auto f = [](sem::Real x) { return std::sin(x); };
@@ -114,12 +119,14 @@ int main() {
     printf("Norms of error: C = %.3e  C1 = %.3e  L1 = %.3e  L2 = %.3e\n", norms.c, norms.c1, norms.l1, norms.l2);
 
 
-    sem::io::Figure fig("Приближение u(x)");
-    fig.setXLabel("x").setYLabel("u");
-    fig.plotFunction(u, -1, 1, 200, "точная", "-"); // функция на равномерной сетке
-    fig.plotFunction(u_approximation, -1, 1, 200, "SEM", "--");
-    fig.plot(basis.points(), coeff, "узлы GLL", "o"); // точки (x, y)
-    fig.render("approx.json", {.image = "approx.png"}); // сохранить картинку и открыть окно
+    // Подписи на английском: картинка используется в README (docs/images).
+    sem::io::Figure fig(R"($u'' + u = f$ on $[-1, 1]$, $u(\pm 1) = 0$: one spectral element, $N = )" +
+                        std::to_string(N) + "$");
+    fig.setXLabel("$x$").setYLabel("$u$");
+    fig.plotFunction(u, -1, 1, 400, "exact solution", "-"); // функция на равномерной сетке
+    fig.plotFunction(u_approximation, -1, 1, 400, "SEM solution", "--");
+    fig.plot(basis.points(), coeff, "GLL nodes", "o"); // точки (x, y)
+    fig.render("helmholtz_1d.json", {.image = "helmholtz_1d.png", .showWindow = showWindow});
 
     return 0;
 }

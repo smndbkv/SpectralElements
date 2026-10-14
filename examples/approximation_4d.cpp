@@ -114,9 +114,10 @@ int main(int argc, char **argv) {
     // экспоненциальная сходимость выглядит как прямая линия.
     // Строки с TeX собираются сложением, а не через std::format: в std::format фигурные
     // скобки TeX пришлось бы удваивать.
-    sem::io::Figure errors("Приближение " + uFormula + R"( на $[-1, 1]^4$)");
-    errors.setXLabel(R"(степень $N$)")
-            .setYLabel(R"(норма ошибки $u - u_N$)" "\n" "(логарифмическая шкала)")
+    // Подписи на английском: картинки используются в README (docs/images).
+    sem::io::Figure errors("Approximation of " + uFormula + R"( on $[-1, 1]^4$)");
+    errors.setXLabel(R"(degree $N$)")
+            .setYLabel(R"(error norm of $u - u_N$)" "\n" "(logarithmic scale)")
             .setYScale(sem::io::AxisScale::Log)
             .plot(degrees, errorC, "$C$", "o-")
             .plot(degrees, errorC1, "$C^1$", "s-")
@@ -124,9 +125,9 @@ int main(int argc, char **argv) {
             .plot(degrees, errorL2, "$L^2$", "v-");
     // Те же нормы в обычной (линейной) шкале: видно, насколько велика ошибка при малых N
     // и как быстро она становится неотличимой от нуля.
-    sem::io::Figure errorsLinear("Приближение " + uFormula + R"( на $[-1, 1]^4$)");
-    errorsLinear.setXLabel(R"(степень $N$)")
-            .setYLabel(R"(норма ошибки $u - u_N$)")
+    sem::io::Figure errorsLinear("Approximation of " + uFormula + R"( on $[-1, 1]^4$)");
+    errorsLinear.setXLabel(R"(degree $N$)")
+            .setYLabel(R"(error norm of $u - u_N$)" "\n" "(linear scale)")
             .plot(degrees, errorC, "$C$", "o-")
             .plot(degrees, errorC1, "$C^1$", "s-")
             .plot(degrees, errorL1, "$L^1$", "^-")
