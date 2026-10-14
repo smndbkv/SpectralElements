@@ -18,6 +18,7 @@ add_executable(sem_tests
     test_tensor_basis.cpp
     test_error_norms_tensor.cpp
     test_plot2d.cpp
+    test_timer.cpp
 )
 target_link_libraries(sem_tests PRIVATE sem::sem Catch2::Catch2WithMain)
 
