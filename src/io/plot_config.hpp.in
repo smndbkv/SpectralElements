@@ -1,0 +1,11 @@
+#pragma once
+
+// Сгенерировано CMake из src/io/plot_config.hpp.in — не редактировать вручную.
+// Интерпретатор задаётся переменной кэша SEM_PYTHON_EXECUTABLE.
+
+namespace sem::io::config {
+
+inline constexpr char8_t kPythonExecutable[] = u8"@SEM_PYTHON_EXECUTABLE@";
+inline constexpr char8_t kPlotScript[]       = u8"@SEM_PLOT_SCRIPT@";
+
+} // namespace sem::io::config

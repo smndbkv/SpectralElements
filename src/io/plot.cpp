@@ -1,0 +1,368 @@
+#include "sem/io/plot.hpp"
+
+#include <cassert>
+#include <charconv>
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
+#include <fstream>
+#include <iostream>
+#include <string_view>
+#include <system_error>
+
+#include "sem/io/plot_config.hpp"
+
+namespace sem::io {
+
+namespace {
+
+void appendString(std::string& out, std::string_view s) {
+    out += '"';
+    for (const char c : s) {
+        switch (c) {
+        case '"':  out += "\\\""; break;
+        case '\\': out += "\\\\"; break;
+        case '\n': out += "\\n"; break;
+        case '\r': out += "\\r"; break;
+        case '\t': out += "\\t"; break;
+        default:
+            if (static_cast<unsigned char>(c) < 0x20) {
+                char buf[8];
+                std::snprintf(buf, sizeof buf, "\\u%04x",
+                              static_cast<unsigned>(static_cast<unsigned char>(c)));
+                out += buf;
+            } else {
+                out += c;  // байты UTF-8 (в том числе кириллица) передаются как есть
+            }
+        }
+    }
+    out += '"';
+}
+
+void appendNumber(std::string& out, Real v) {
+    // NaN и бесконечности не входят в стандарт JSON, но модуль json в Python
+    // их понимает, а matplotlib просто не рисует такие точки.
+    if (std::isnan(v)) {
+        out += "NaN";
+        return;
+    }
+    if (std::isinf(v)) {
+        out += v > 0 ? "Infinity" : "-Infinity";
+        return;
+    }
+    // Кратчайшее представление, которое читается обратно без потерь и не зависит от локали.
+    char buf[32];
+    const auto [end, ec] = std::to_chars(buf, buf + sizeof buf, v);
+    assert(ec == std::errc{});
+    out.append(buf, end);
+}
+
+void appendArray(std::string& out, const std::vector<Real>& values) {
+    out += '[';
+    for (std::size_t i = 0; i < values.size(); ++i) {
+        if (i > 0) {
+            out += ", ";
+        }
+        appendNumber(out, values[i]);
+    }
+    out += ']';
+}
+
+std::string_view scaleName(AxisScale scale) {
+    return scale == AxisScale::Log ? "log" : "linear";
+}
+
+int runPlotScript(const std::filesystem::path& dataFile, const RenderOptions& options) {
+    const std::filesystem::path python(config::kPythonExecutable);
+    const std::filesystem::path script(config::kPlotScript);
+
+#ifdef _WIN32
+    // Широкие строки: пути с кириллицей не должны проходить через ANSI-кодировку.
+    const auto quote = [](const std::filesystem::path& p) {
+        return L"\"" + p.wstring() + L"\"";
+    };
+    std::wstring command = quote(python) + L" " + quote(script) + L" " + quote(dataFile);
+    if (!options.image.empty()) {
+        command += L" --output " + quote(options.image);
+    }
+    if (!options.showWindow) {
+        command += L" --no-show";
+    }
+    // cmd.exe /c снимает внешнюю пару кавычек, поэтому вся команда оборачивается ещё раз.
+    command = L"\"" + command + L"\"";
+    return _wsystem(command.c_str());
+#else
+    const auto quote = [](const std::filesystem::path& p) { return "'" + p.string() + "'"; };
+    std::string command = quote(python) + " " + quote(script) + " " + quote(dataFile);
+    if (!options.image.empty()) {
+        command += " --output " + quote(options.image);
+    }
+    if (!options.showWindow) {
+        command += " --no-show";
+    }
+    return std::system(command.c_str());
+#endif
+}
+
+void writeTextFile(const std::filesystem::path& path, const std::string& text, const char* who) {
+    std::ofstream file(path, std::ios::binary);
+    if (!file) {
+        throw std::runtime_error(std::string(who) + ": cannot open " + path.string());
+    }
+    file << text;
+    if (!file) {
+        throw std::runtime_error(std::string(who) + ": write failed for " + path.string());
+    }
+}
+
+// Общая часть render: проверка опций, запись JSON и запуск tools/plot.py.
+bool renderJson(const std::string& json, const std::filesystem::path& dataFile,
+                const RenderOptions& options, const char* who) {
+    if (!options.showWindow && options.image.empty()) {
+        throw std::invalid_argument(
+            std::string(who) + ": nothing to do, set an image path or enable the window");
+    }
+    writeTextFile(dataFile, json, who);
+
+    const int status = runPlotScript(dataFile, options);
+    if (status != 0) {
+        std::cerr << who << ": plot script failed (exit code " << status
+                  << "). Check SEM_PYTHON_EXECUTABLE in CMake and that matplotlib is installed.\n";
+        return false;
+    }
+    return true;
+}
+
+std::string_view fieldStyleName(FieldStyle style) {
+    switch (style) {
+    case FieldStyle::Heatmap: return "heatmap";
+    case FieldStyle::Contour: return "contour";
+    case FieldStyle::Surface: return "surface";
+    }
+    return "heatmap";
+}
+
+} // namespace
+
+Figure::Figure(std::string title) : title_(std::move(title)) {}
+
+Figure& Figure::setTitle(std::string title) {
+    title_ = std::move(title);
+    return *this;
+}
+
+Figure& Figure::setXLabel(std::string label) {
+    xLabel_ = std::move(label);
+    return *this;
+}
+
+Figure& Figure::setYLabel(std::string label) {
+    yLabel_ = std::move(label);
+    return *this;
+}
+
+Figure& Figure::setXScale(AxisScale scale) {
+    xScale_ = scale;
+    return *this;
+}
+
+Figure& Figure::setYScale(AxisScale scale) {
+    yScale_ = scale;
+    return *this;
+}
+
+Figure& Figure::plot(std::span<const Real> x, std::span<const Real> y,
+                     std::string label, std::string style) {
+    if (x.size() != y.size()) {
+        throw std::invalid_argument("Figure::plot: x and y must have the same size");
+    }
+    series_.push_back({std::move(label), std::move(style),
+                       std::vector<Real>(x.begin(), x.end()),
+                       std::vector<Real>(y.begin(), y.end())});
+    return *this;
+}
+
+std::string Figure::toJson() const {
+    std::string out = "{\n";
+    out += "  \"title\": ";
+    appendString(out, title_);
+    out += ",\n  \"xlabel\": ";
+    appendString(out, xLabel_);
+    out += ",\n  \"ylabel\": ";
+    appendString(out, yLabel_);
+    out += ",\n  \"xscale\": ";
+    appendString(out, scaleName(xScale_));
+    out += ",\n  \"yscale\": ";
+    appendString(out, scaleName(yScale_));
+    out += ",\n  \"series\": [";
+    for (std::size_t s = 0; s < series_.size(); ++s) {
+        const Series& series = series_[s];
+        out += s == 0 ? "\n" : ",\n";
+        out += "    {\"label\": ";
+        appendString(out, series.label);
+        out += ", \"style\": ";
+        appendString(out, series.style);
+        out += ",\n     \"x\": ";
+        appendArray(out, series.x);
+        out += ",\n     \"y\": ";
+        appendArray(out, series.y);
+        out += '}';
+    }
+    out += series_.empty() ? "]\n}\n" : "\n  ]\n}\n";
+    return out;
+}
+
+void Figure::saveJson(const std::filesystem::path& path) const {
+    writeTextFile(path, toJson(), "Figure::saveJson");
+}
+
+bool Figure::render(const std::filesystem::path& dataFile, const RenderOptions& options) const {
+    return renderJson(toJson(), dataFile, options, "sem::io::Figure::render");
+}
+
+// ---------------------------------------------------------------------------
+// Figure2D
+// ---------------------------------------------------------------------------
+
+Figure2D::Figure2D(std::string title) : title_(std::move(title)) {}
+
+Figure2D& Figure2D::setTitle(std::string title) {
+    title_ = std::move(title);
+    return *this;
+}
+
+Figure2D& Figure2D::setXLabel(std::string label) {
+    xLabel_ = std::move(label);
+    return *this;
+}
+
+Figure2D& Figure2D::setYLabel(std::string label) {
+    yLabel_ = std::move(label);
+    return *this;
+}
+
+Figure2D& Figure2D::setColorLabel(std::string label) {
+    colorLabel_ = std::move(label);
+    return *this;
+}
+
+Figure2D& Figure2D::setStyle(FieldStyle style) {
+    style_ = style;
+    return *this;
+}
+
+Figure2D& Figure2D::setColorScale(AxisScale scale) {
+    colorScale_ = scale;
+    return *this;
+}
+
+void Figure2D::checkField(std::span<const Real> x, std::span<const Real> y,
+                          std::span<const Real> z, const char* who) {
+    if (x.size() < 2 || y.size() < 2) {
+        throw std::invalid_argument(std::string(who) + ": at least 2 points per direction");
+    }
+    if (z.size() != x.size() * y.size()) {
+        throw std::invalid_argument(std::string(who) + ": z must hold x.size() * y.size() values");
+    }
+}
+
+Figure2D& Figure2D::setField(std::span<const Real> x, std::span<const Real> y,
+                             std::span<const Real> z) {
+    checkField(x, y, z, "Figure2D::setField");
+    field_.x.assign(x.begin(), x.end());
+    field_.y.assign(y.begin(), y.end());
+    field_.z.assign(z.begin(), z.end());
+    return *this;
+}
+
+Figure2D& Figure2D::setFieldLabel(std::string label) {
+    field_.label = std::move(label);
+    return *this;
+}
+
+Figure2D& Figure2D::addOverlay(std::span<const Real> x, std::span<const Real> y,
+                               std::span<const Real> z, std::string label) {
+    checkField(x, y, z, "Figure2D::addOverlay");
+    overlays_.push_back({std::move(label), std::vector<Real>(x.begin(), x.end()),
+                         std::vector<Real>(y.begin(), y.end()),
+                         std::vector<Real>(z.begin(), z.end())});
+    return *this;
+}
+
+Figure2D& Figure2D::addPoints(std::span<const Real> x, std::span<const Real> y,
+                              std::string label, std::string style) {
+    if (x.size() != y.size()) {
+        throw std::invalid_argument("Figure2D::addPoints: x and y must have the same size");
+    }
+    points_.push_back({std::move(label), std::move(style),
+                       std::vector<Real>(x.begin(), x.end()),
+                       std::vector<Real>(y.begin(), y.end())});
+    return *this;
+}
+
+std::string Figure2D::toJson() const {
+    std::string out = "{\n  \"kind\": \"field2d\",\n  \"title\": ";
+    appendString(out, title_);
+    out += ",\n  \"xlabel\": ";
+    appendString(out, xLabel_);
+    out += ",\n  \"ylabel\": ";
+    appendString(out, yLabel_);
+    out += ",\n  \"zlabel\": ";
+    appendString(out, colorLabel_);
+    out += ",\n  \"style\": ";
+    appendString(out, fieldStyleName(style_));
+    out += ",\n  \"zscale\": ";
+    appendString(out, scaleName(colorScale_));
+    out += ",\n  \"label\": ";
+    appendString(out, field_.label);
+    out += ",\n  \"x\": ";
+    appendArray(out, field_.x);
+    out += ",\n  \"y\": ";
+    appendArray(out, field_.y);
+    out += ",\n  \"z\": ";
+    appendArray(out, field_.z);
+    out += ",\n  \"overlays\": [";
+    for (std::size_t s = 0; s < overlays_.size(); ++s) {
+        const Field& overlay = overlays_[s];
+        out += s == 0 ? "\n" : ",\n";
+        out += "    {\"label\": ";
+        appendString(out, overlay.label);
+        out += ",\n     \"x\": ";
+        appendArray(out, overlay.x);
+        out += ",\n     \"y\": ";
+        appendArray(out, overlay.y);
+        out += ",\n     \"z\": ";
+        appendArray(out, overlay.z);
+        out += '}';
+    }
+    out += overlays_.empty() ? "]" : "\n  ]";
+    out += ",\n  \"points\": [";
+    for (std::size_t s = 0; s < points_.size(); ++s) {
+        const PointSet& set = points_[s];
+        out += s == 0 ? "\n" : ",\n";
+        out += "    {\"label\": ";
+        appendString(out, set.label);
+        out += ", \"style\": ";
+        appendString(out, set.style);
+        out += ",\n     \"x\": ";
+        appendArray(out, set.x);
+        out += ",\n     \"y\": ";
+        appendArray(out, set.y);
+        out += '}';
+    }
+    out += points_.empty() ? "]\n}\n" : "\n  ]\n}\n";
+    return out;
+}
+
+void Figure2D::saveJson(const std::filesystem::path& path) const {
+    writeTextFile(path, toJson(), "Figure2D::saveJson");
+}
+
+bool Figure2D::render(const std::filesystem::path& dataFile, const RenderOptions& options) const {
+    if (field_.z.empty()) {
+        throw std::invalid_argument("Figure2D::render: no field data, call setField or setFunction");
+    }
+    return renderJson(toJson(), dataFile, options, "sem::io::Figure2D::render");
+}
+
+} // namespace sem::io
