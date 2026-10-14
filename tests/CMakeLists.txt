@@ -9,6 +9,10 @@ FetchContent_MakeAvailable(Catch2)
 add_executable(sem_tests
     test_dense_matrix.cpp
     test_linear_solve.cpp
+    test_legendre.cpp
+    test_quadrature.cpp
+    test_lagrange_basis.cpp
+    test_spectral_basis.cpp
 )
 target_link_libraries(sem_tests PRIVATE sem::sem Catch2::Catch2WithMain)
 

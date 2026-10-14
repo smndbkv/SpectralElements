@@ -14,6 +14,10 @@ option(SEM_BUILD_TESTS "Build unit tests" ON)
 add_library(sem
     src/core/dense_matrix.cpp
     src/core/linear_solve.cpp
+    src/basis/legendre.cpp
+    src/basis/quadrature.cpp
+    src/basis/lagrange_basis.cpp
+    src/basis/spectral_basis.cpp
 )
 add_library(sem::sem ALIAS sem)
 
