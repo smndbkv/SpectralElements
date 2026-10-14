@@ -18,6 +18,7 @@ add_library(sem
     src/basis/quadrature.cpp
     src/basis/lagrange_basis.cpp
     src/basis/spectral_basis.cpp
+    src/analysis/error_norms.cpp
 )
 add_library(sem::sem ALIAS sem)
 

@@ -13,7 +13,9 @@ add_executable(sem_tests
     test_quadrature.cpp
     test_lagrange_basis.cpp
     test_spectral_basis.cpp
+    test_error_norms.cpp
     test_tensor_basis.cpp
+    test_error_norms_tensor.cpp
 )
 target_link_libraries(sem_tests PRIVATE sem::sem Catch2::Catch2WithMain)
 
