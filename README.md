@@ -22,6 +22,17 @@ weights. The error is $\Vert u - u_N \Vert_{L^2} \approx 2 \cdot 10^{-4}$.
 
 ![Solution of u'' + u = f](docs/images/helmholtz_1d.png)
 
+For smooth solutions the convergence is exponential: the error drops by roughly an order
+of magnitude per degree and reaches the rounding level already at $N \approx 14$–$16$.
+Beyond that point only round-off remains, amplified by the condition number of the system,
+which grows like $N^3$. The pointwise error oscillates with zeros close to the GLL nodes;
+at $N = 16$ it is a smooth curve of size $10^{-14}$, i.e. rounding, not discretization.
+
+<p>
+  <img src="docs/images/helmholtz_1d_convergence.png" width="49%" alt="Spectral convergence for u'' + u = f">
+  <img src="docs/images/helmholtz_1d_pointwise_error.png" width="49%" alt="Pointwise error for N = 4, 8, 12, 16">
+</p>
+
 ### Spectral convergence in 4D
 
 Interpolation of $u(x, y, z, t) = e^{x}\sin 3y + z^2 + t\sin t$ on the reference element
@@ -69,7 +80,7 @@ In CLion, open the folder and choose the `Release (-O3)` profile from `CMakePres
 |---|---|
 | `example_plot_basis` | Lagrange basis on GLL nodes and spectral convergence of interpolation |
 | `example_approximation_1d` | Approximation on $K$ elements: mapping to the reference element, $h$-convergence |
-| `example_differential_equation_1d` | Galerkin solution of $u'' + u = f$, $u(\pm 1) = 0$ |
+| `example_differential_equation_1d` | Galerkin solution of $u'' + u = f$, $u(\pm 1) = 0$; spectral convergence down to machine precision |
 | `example_approximation_4d` | Interpolation on $[-1, 1]^4$, error norms and convergence plots for $N = 1, \dots, 10$ |
 
 Every example opens matplotlib windows; with `--no-show` it only saves the images.
