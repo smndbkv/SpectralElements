@@ -10,6 +10,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(SEM_BUILD_TESTS "Build unit tests" ON)
+option(SEM_BUILD_EXAMPLES "Build examples" ON)
 
 # Python нужен только во время работы программы (sem::io::Figure::render),
 # не при сборке. Путь можно переопределить: -DSEM_PYTHON_EXECUTABLE=...
@@ -46,6 +47,10 @@ if (MSVC)
     target_compile_options(sem PRIVATE /W4 /permissive-)
 else ()
     target_compile_options(sem PRIVATE -Wall -Wextra -Wpedantic -Wshadow -Wconversion)
+endif ()
+
+if (SEM_BUILD_EXAMPLES)
+    add_subdirectory(examples)
 endif ()
 
 if (SEM_BUILD_TESTS)
