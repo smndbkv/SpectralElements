@@ -11,6 +11,22 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(SEM_BUILD_TESTS "Build unit tests" ON)
 option(SEM_BUILD_EXAMPLES "Build examples" ON)
+option(SEM_NATIVE_ARCH "Release: optimize for the CPU of this machine (-march=native)" OFF)
+
+# Без явного типа сборки однопроходные генераторы (Ninja, Makefiles) собирают
+# вообще без оптимизации. Для численного кода разумнее Release по умолчанию.
+if (NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+endif ()
+
+# Release: -O3 и NDEBUG (assert отключены). У GCC/Clang это совпадает с умолчанием
+# CMake, но задаём явно, чтобы не зависеть от тулчейна. Действует на все цели ниже.
+if (NOT MSVC)
+    add_compile_options($<$<CONFIG:Release>:-O3>)
+    if (SEM_NATIVE_ARCH)
+        add_compile_options($<$<CONFIG:Release>:-march=native>)
+    endif ()
+endif ()
 
 # Python нужен только во время работы программы (sem::io::Figure::render),
 # не при сборке. Путь можно переопределить: -DSEM_PYTHON_EXECUTABLE=...
@@ -47,6 +63,13 @@ if (MSVC)
     target_compile_options(sem PRIVATE /W4 /permissive-)
 else ()
     target_compile_options(sem PRIVATE -Wall -Wextra -Wpedantic -Wshadow -Wconversion)
+endif ()
+
+# main.cpp — локальная программа для экспериментов, в git не хранится (см. .gitignore).
+# Цель собирается, только если файл есть.
+if (EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp)
+    add_executable(spectral_elements main.cpp)
+    target_link_libraries(spectral_elements PRIVATE sem::sem)
 endif ()
 
 if (SEM_BUILD_EXAMPLES)
