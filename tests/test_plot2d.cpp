@@ -79,6 +79,61 @@ TEST_CASE("Figure2D: field label and overlays", "[io][plot][plot2d]") {
     CHECK(contains(plain.toJson(), R"("overlays": [],)"));
 }
 
+TEST_CASE("VectorFigure3D: JSON with points, vectors and automatic arrow length", "[io][plot]") {
+    // Сетка 2 x 2 x 2 на [0, 1]^3, v = (x, 2y, 3z); x меняется быстрее всего.
+    sem::io::VectorFigure3D fig("поле");
+    fig.setColorLabel("|v|").setFunction(
+        [](const Point<3>& p) { return Point<3>{p[0], 2 * p[1], 3 * p[2]}; }, {0, 0, 0}, {1, 1, 1}, 2);
+
+    const std::string json = fig.toJson();
+    CHECK(contains(json, R"("kind": "vector3d")"));
+    CHECK(contains(json, R"("clabel": "|v|")"));
+    CHECK(contains(json, R"("arrow_length": 0.9)"));  // 0.9 шага сетки
+    CHECK(contains(json, R"("normalize": false)"));
+    CHECK(contains(json, R"("x": [0, 1, 0, 1, 0, 1, 0, 1])"));
+    CHECK(contains(json, R"("z": [0, 0, 0, 0, 1, 1, 1, 1])"));
+    CHECK(contains(json, R"("vy": [0, 0, 2, 2, 0, 0, 2, 2])"));
+
+    fig.setNormalize(true).setArrowLength(0.25);
+    CHECK(contains(fig.toJson(), R"("arrow_length": 0.25)"));
+    CHECK(contains(fig.toJson(), R"("normalize": true)"));
+}
+
+TEST_CASE("VectorFigure3D: invalid arguments", "[io][plot]") {
+    const std::vector<Real> a{0, 1}, b{0};
+    sem::io::VectorFigure3D fig;
+    CHECK_THROWS_AS(fig.setVectors(a, a, a, a, a, b), std::invalid_argument);
+    CHECK_THROWS_AS(fig.setFunction([](const Point<3>& p) { return p; }, {0, 0, 0}, {1, 1, 1}, 1),
+                    std::invalid_argument);
+    CHECK_THROWS_AS(fig.render("unused.json", {.image = "unused.png", .showWindow = false}),
+                    std::invalid_argument);  // нет данных
+}
+
+TEST_CASE("ScalarFigure3D: JSON with grid axes and x-fastest values", "[io][plot]") {
+    // f = x + 10 y + 100 z на сетке 2 x 2 x 2 куба [0, 1]^3.
+    sem::io::ScalarFigure3D fig("u");
+    fig.setColorLabel("$u$").setFunction(
+        [](const Point<3>& p) { return p[0] + 10 * p[1] + 100 * p[2]; }, {0, 0, 0}, {1, 1, 1}, 2);
+
+    std::string json = fig.toJson();
+    CHECK(contains(json, R"("kind": "scalar3d")"));
+    CHECK(contains(json, R"("style": "faces")"));
+    CHECK(contains(json, R"("x": [0, 1])"));
+    CHECK(contains(json, R"("values": [0, 1, 10, 11, 100, 101, 110, 111])"));
+
+    fig.setStyle(sem::io::Scalar3DStyle::Scatter);
+    CHECK(contains(fig.toJson(), R"("style": "scatter")"));
+}
+
+TEST_CASE("ScalarFigure3D: invalid arguments", "[io][plot]") {
+    const std::vector<Real> a{0, 1}, one{0};
+    sem::io::ScalarFigure3D fig;
+    CHECK_THROWS_AS(fig.setField(a, a, a, std::vector<Real>(7)), std::invalid_argument);  // нужно 8
+    CHECK_THROWS_AS(fig.setField(one, a, a, std::vector<Real>(4)), std::invalid_argument);
+    CHECK_THROWS_AS(fig.render("unused.json", {.image = "unused.png", .showWindow = false}),
+                    std::invalid_argument);  // нет данных
+}
+
 TEST_CASE("renderAll: invalid arguments", "[io][plot]") {
     using sem::io::PlotItem;
     const std::vector<PlotItem> none;

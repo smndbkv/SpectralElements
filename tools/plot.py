@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Рисует графики по JSON-файлу, который записывает sem::io::Figure или sem::io::Figure2D.
+"""Рисует графики по JSON-файлам, которые записывают классы из sem/io/plot.hpp.
 
 Использование:
     python tools/plot.py data.json                       # открыть окно
@@ -25,6 +25,26 @@
       "overlays": [{"label": "...", "x": [...], "y": [...], "z": [...]}, ...],
       "points": [{"label": "...", "style": "k.", "x": [...], "y": [...]}, ...]
     }
+
+Формат векторного поля в 3D (VectorFigure3D):
+    {
+      "kind": "vector3d",
+      "title": "...", "xlabel": "...", "ylabel": "...", "zlabel": "...", "clabel": "...",
+      "arrow_length": 0.2,                  (длина самой длинной стрелки; <= 0 — автоматически)
+      "normalize": false,                   (true — все стрелки одной длины)
+      "x": [...], "y": [...], "z": [...],   (точки)
+      "vx": [...], "vy": [...], "vz": [...] (векторы)
+    }
+
+Формат скалярного поля в 3D (ScalarFigure3D):
+    {
+      "kind": "scalar3d",
+      "title": "...", "xlabel": "...", "ylabel": "...", "zlabel": "...", "clabel": "...",
+      "style": "faces" | "scatter",
+      "x": [nx], "y": [ny], "z": [nz],
+      "values": [nx * ny * nz значений, values[i + nx * (j + ny * k)] — в точке (x[i], y[j], z[k])]
+    }
+
 """
 
 import argparse
@@ -151,6 +171,83 @@ def draw_field(data, fig):
     ax.set_ylabel(data.get("ylabel", ""))
 
 
+def draw_vector3d(data, fig):
+    """Стрелки в 3D: цвет — модуль вектора, длина — пропорциональна модулю (или одинаковая)."""
+    import numpy as np
+    from matplotlib import cm, colormaps
+    from matplotlib.colors import Normalize
+
+    x, y, z, u, v, w = (np.asarray(data[key], dtype=float) for key in ("x", "y", "z", "vx", "vy", "vz"))
+    magnitude = np.sqrt(u * u + v * v + w * w)
+
+    length = float(data.get("arrow_length", 0) or 0)
+    if length <= 0:  # автоматически: десятая часть наибольшего размера области
+        length = 0.1 * max(np.ptp(x), np.ptp(y), np.ptp(z), 1e-12)
+
+    if data.get("normalize", False):
+        scale = np.where(magnitude > 0, length / np.where(magnitude > 0, magnitude, 1), 0)
+    else:
+        scale = np.full_like(magnitude, length / magnitude.max() if magnitude.max() > 0 else 0)
+
+    ax = fig.add_subplot(projection="3d")
+    norm = Normalize(vmin=magnitude.min(), vmax=magnitude.max())
+    cmap = colormaps["viridis"]
+    colors = cmap(norm(magnitude))
+    # У каждой стрелки 3D quiver три отрезка: стержень и две половинки наконечника.
+    # matplotlib складывает их блоками — все стержни, все левые половинки, все правые
+    # (lines = [*shafts, *heads[::2], *heads[1::2]]), поэтому цвета повторяются блоками.
+    colors = np.concatenate((colors, colors, colors))
+    ax.quiver(x, y, z, u * scale, v * scale, w * scale, length=1.0, normalize=False,
+              colors=colors, linewidth=1.2, arrow_length_ratio=0.3)
+
+    fig.colorbar(cm.ScalarMappable(norm=norm, cmap=cmap), ax=ax, shrink=0.7,
+                 label=data.get("clabel", ""))
+    ax.set_title(data.get("title", ""))
+    ax.set_xlabel(data.get("xlabel", ""))
+    ax.set_ylabel(data.get("ylabel", ""))
+    ax.set_zlabel(data.get("zlabel", ""))
+    ax.set_box_aspect((np.ptp(x) or 1, np.ptp(y) or 1, np.ptp(z) or 1))
+
+
+def draw_scalar3d(data, fig):
+    """Скалярное поле на регулярной сетке в 3D: раскрашенные грани или облако точек."""
+    import numpy as np
+    from matplotlib import cm, colormaps
+    from matplotlib.colors import Normalize
+
+    x, y, z = (np.asarray(data[key], dtype=float) for key in ("x", "y", "z"))
+    # values[i + nx * (j + ny * k)] -> массив (nz, ny, nx)
+    v = np.asarray(data["values"], dtype=float).reshape(len(z), len(y), len(x))
+
+    norm = Normalize(vmin=v.min(), vmax=v.max())
+    cmap = colormaps["viridis"]
+    ax = fig.add_subplot(projection="3d")
+
+    if data.get("style") == "scatter":
+        Z, Y, X = np.meshgrid(z, y, x, indexing="ij")
+        ax.scatter(X.ravel(), Y.ravel(), Z.ravel(), c=v.ravel(), cmap=cmap, norm=norm,
+                   s=10, alpha=0.5, depthshade=False, linewidths=0)
+    else:
+        # Грани, видимые с ракурса matplotlib по умолчанию (elev=30, azim=-60):
+        # x = max (справа), y = min (спереди), z = max (сверху). Внутренних плоскостей нет,
+        # поэтому нет и артефактов перекрытия.
+        common = dict(rstride=1, cstride=1, shade=False, linewidth=0, antialiased=False)
+        YY, ZZ = np.meshgrid(y, z)
+        ax.plot_surface(np.full_like(YY, x[-1]), YY, ZZ, facecolors=cmap(norm(v[:, :, -1])), **common)
+        XX, ZZ = np.meshgrid(x, z)
+        ax.plot_surface(XX, np.full_like(XX, y[0]), ZZ, facecolors=cmap(norm(v[:, 0, :])), **common)
+        XX, YY = np.meshgrid(x, y)
+        ax.plot_surface(XX, YY, np.full_like(XX, z[-1]), facecolors=cmap(norm(v[-1, :, :])), **common)
+
+    fig.colorbar(cm.ScalarMappable(norm=norm, cmap=cmap), ax=ax, shrink=0.7,
+                 label=data.get("clabel", ""))
+    ax.set_title(data.get("title", ""))
+    ax.set_xlabel(data.get("xlabel", ""))
+    ax.set_ylabel(data.get("ylabel", ""))
+    ax.set_zlabel(data.get("zlabel", ""))
+    ax.set_box_aspect((np.ptp(x) or 1, np.ptp(y) or 1, np.ptp(z) or 1))
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Draw sem::io::Figure / Figure2D JSON files.")
     parser.add_argument("data", type=Path, nargs="+",
@@ -180,6 +277,12 @@ def main(argv=None):
         if data.get("kind") == "field2d":
             fig = plt.figure(figsize=(8, 6.5), layout="constrained")
             draw_field(data, fig)
+        elif data.get("kind") == "vector3d":
+            fig = plt.figure(figsize=(8, 7), layout="constrained")
+            draw_vector3d(data, fig)
+        elif data.get("kind") == "scalar3d":
+            fig = plt.figure(figsize=(8, 7), layout="constrained")
+            draw_scalar3d(data, fig)
         else:
             fig = plt.figure(figsize=(8, 5), layout="constrained")
             draw_lines(data, fig)

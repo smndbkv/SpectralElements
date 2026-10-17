@@ -392,6 +392,189 @@ bool Figure2D::render(const std::filesystem::path& dataFile, const RenderOptions
     return renderJson(toJson(), dataFile, options, "sem::io::Figure2D::render");
 }
 
+// ---------------------------------------------------------------------------
+// VectorFigure3D
+// ---------------------------------------------------------------------------
+
+VectorFigure3D::VectorFigure3D(std::string title) : title_(std::move(title)) {}
+
+VectorFigure3D& VectorFigure3D::setTitle(std::string title) {
+    title_ = std::move(title);
+    return *this;
+}
+
+VectorFigure3D& VectorFigure3D::setXLabel(std::string label) {
+    xLabel_ = std::move(label);
+    return *this;
+}
+
+VectorFigure3D& VectorFigure3D::setYLabel(std::string label) {
+    yLabel_ = std::move(label);
+    return *this;
+}
+
+VectorFigure3D& VectorFigure3D::setZLabel(std::string label) {
+    zLabel_ = std::move(label);
+    return *this;
+}
+
+VectorFigure3D& VectorFigure3D::setColorLabel(std::string label) {
+    colorLabel_ = std::move(label);
+    return *this;
+}
+
+VectorFigure3D& VectorFigure3D::setArrowLength(Real length) {
+    arrowLength_ = length;
+    return *this;
+}
+
+VectorFigure3D& VectorFigure3D::setNormalize(bool normalize) {
+    normalize_ = normalize;
+    return *this;
+}
+
+VectorFigure3D& VectorFigure3D::setVectors(std::span<const Real> x, std::span<const Real> y,
+                                           std::span<const Real> z, std::span<const Real> vx,
+                                           std::span<const Real> vy, std::span<const Real> vz) {
+    const std::size_t n = x.size();
+    if (y.size() != n || z.size() != n || vx.size() != n || vy.size() != n || vz.size() != n) {
+        throw std::invalid_argument("VectorFigure3D::setVectors: all arrays must have the same size");
+    }
+    x_.assign(x.begin(), x.end());
+    y_.assign(y.begin(), y.end());
+    z_.assign(z.begin(), z.end());
+    vx_.assign(vx.begin(), vx.end());
+    vy_.assign(vy.begin(), vy.end());
+    vz_.assign(vz.begin(), vz.end());
+    return *this;
+}
+
+std::string VectorFigure3D::toJson() const {
+    std::string out = "{\n  \"kind\": \"vector3d\",\n  \"title\": ";
+    appendString(out, title_);
+    out += ",\n  \"xlabel\": ";
+    appendString(out, xLabel_);
+    out += ",\n  \"ylabel\": ";
+    appendString(out, yLabel_);
+    out += ",\n  \"zlabel\": ";
+    appendString(out, zLabel_);
+    out += ",\n  \"clabel\": ";
+    appendString(out, colorLabel_);
+    out += ",\n  \"arrow_length\": ";
+    appendNumber(out, arrowLength_);
+    out += ",\n  \"normalize\": ";
+    out += normalize_ ? "true" : "false";
+    const std::pair<const char*, const std::vector<Real>*> arrays[] = {
+        {"x", &x_}, {"y", &y_}, {"z", &z_}, {"vx", &vx_}, {"vy", &vy_}, {"vz", &vz_}};
+    for (const auto& [name, values] : arrays) {
+        out += ",\n  \"";
+        out += name;
+        out += "\": ";
+        appendArray(out, *values);
+    }
+    out += "\n}\n";
+    return out;
+}
+
+void VectorFigure3D::saveJson(const std::filesystem::path& path) const {
+    writeTextFile(path, toJson(), "VectorFigure3D::saveJson");
+}
+
+bool VectorFigure3D::render(const std::filesystem::path& dataFile, const RenderOptions& options) const {
+    if (x_.empty()) {
+        throw std::invalid_argument("VectorFigure3D::render: no vectors, call setVectors or setFunction");
+    }
+    return renderJson(toJson(), dataFile, options, "sem::io::VectorFigure3D::render");
+}
+
+// ---------------------------------------------------------------------------
+// ScalarFigure3D
+// ---------------------------------------------------------------------------
+
+ScalarFigure3D::ScalarFigure3D(std::string title) : title_(std::move(title)) {}
+
+ScalarFigure3D& ScalarFigure3D::setTitle(std::string title) {
+    title_ = std::move(title);
+    return *this;
+}
+
+ScalarFigure3D& ScalarFigure3D::setXLabel(std::string label) {
+    xLabel_ = std::move(label);
+    return *this;
+}
+
+ScalarFigure3D& ScalarFigure3D::setYLabel(std::string label) {
+    yLabel_ = std::move(label);
+    return *this;
+}
+
+ScalarFigure3D& ScalarFigure3D::setZLabel(std::string label) {
+    zLabel_ = std::move(label);
+    return *this;
+}
+
+ScalarFigure3D& ScalarFigure3D::setColorLabel(std::string label) {
+    colorLabel_ = std::move(label);
+    return *this;
+}
+
+ScalarFigure3D& ScalarFigure3D::setStyle(Scalar3DStyle style) {
+    style_ = style;
+    return *this;
+}
+
+ScalarFigure3D& ScalarFigure3D::setField(std::span<const Real> x, std::span<const Real> y,
+                                         std::span<const Real> z, std::span<const Real> values) {
+    if (x.size() < 2 || y.size() < 2 || z.size() < 2) {
+        throw std::invalid_argument("ScalarFigure3D::setField: at least 2 points per direction");
+    }
+    if (values.size() != x.size() * y.size() * z.size()) {
+        throw std::invalid_argument(
+            "ScalarFigure3D::setField: values must hold x.size() * y.size() * z.size() numbers");
+    }
+    x_.assign(x.begin(), x.end());
+    y_.assign(y.begin(), y.end());
+    z_.assign(z.begin(), z.end());
+    values_.assign(values.begin(), values.end());
+    return *this;
+}
+
+std::string ScalarFigure3D::toJson() const {
+    std::string out = "{\n  \"kind\": \"scalar3d\",\n  \"title\": ";
+    appendString(out, title_);
+    out += ",\n  \"xlabel\": ";
+    appendString(out, xLabel_);
+    out += ",\n  \"ylabel\": ";
+    appendString(out, yLabel_);
+    out += ",\n  \"zlabel\": ";
+    appendString(out, zLabel_);
+    out += ",\n  \"clabel\": ";
+    appendString(out, colorLabel_);
+    out += ",\n  \"style\": ";
+    appendString(out, style_ == Scalar3DStyle::Scatter ? "scatter" : "faces");
+    out += ",\n  \"x\": ";
+    appendArray(out, x_);
+    out += ",\n  \"y\": ";
+    appendArray(out, y_);
+    out += ",\n  \"z\": ";
+    appendArray(out, z_);
+    out += ",\n  \"values\": ";
+    appendArray(out, values_);
+    out += "\n}\n";
+    return out;
+}
+
+void ScalarFigure3D::saveJson(const std::filesystem::path& path) const {
+    writeTextFile(path, toJson(), "ScalarFigure3D::saveJson");
+}
+
+bool ScalarFigure3D::render(const std::filesystem::path& dataFile, const RenderOptions& options) const {
+    if (values_.empty()) {
+        throw std::invalid_argument("ScalarFigure3D::render: no data, call setField or setFunction");
+    }
+    return renderJson(toJson(), dataFile, options, "sem::io::ScalarFigure3D::render");
+}
+
 bool renderAll(std::span<const PlotItem> items, bool showWindow) {
     return renderItems(items, showWindow, "sem::io::renderAll");
 }

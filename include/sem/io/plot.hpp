@@ -1,5 +1,7 @@
 #pragma once
 
+#include <algorithm>
+#include <array>
 #include <cstddef>
 #include <filesystem>
 #include <span>
@@ -171,6 +173,146 @@ private:
     std::vector<Field>    overlays_;
     std::vector<PointSet> points_;
 };
+
+// Векторное поле в 3D: стрелки (quiver) в точках (x_k, y_k, z_k) с векторами (vx_k, vy_k, vz_k).
+// Цвет стрелки — модуль вектора (шкала справа), длина — пропорциональна модулю:
+// самая длинная стрелка имеет длину arrowLength. Если normalize = true, все стрелки
+// одной длины arrowLength и показывают только направление.
+class VectorFigure3D {
+public:
+    explicit VectorFigure3D(std::string title = {});
+
+    VectorFigure3D& setTitle(std::string title);
+    VectorFigure3D& setXLabel(std::string label);
+    VectorFigure3D& setYLabel(std::string label);
+    VectorFigure3D& setZLabel(std::string label);
+    VectorFigure3D& setColorLabel(std::string label);  // подпись шкалы цвета (модуль вектора)
+    VectorFigure3D& setArrowLength(Real length);       // <= 0: подобрать автоматически
+    VectorFigure3D& setNormalize(bool normalize);
+
+    // Все шесть массивов одной длины.
+    VectorFigure3D& setVectors(std::span<const Real> x, std::span<const Real> y, std::span<const Real> z,
+                               std::span<const Real> vx, std::span<const Real> vy,
+                               std::span<const Real> vz);
+
+    // Поле f(const Point<3>&) -> Point<3> на равномерной сетке n x n x n параллелепипеда
+    // [lower, upper]. Если длина стрелок не задана, берётся 0.9 шага сетки.
+    template <class F>
+    VectorFigure3D& setFunction(F&& f, const Point<3>& lower, const Point<3>& upper, int n);
+
+    std::string toJson() const;
+    void saveJson(const std::filesystem::path& path) const;
+    bool render(const std::filesystem::path& dataFile, const RenderOptions& options = {}) const;
+
+private:
+    std::string       title_;
+    std::string       xLabel_ = "$x$";
+    std::string       yLabel_ = "$y$";
+    std::string       zLabel_ = "$z$";
+    std::string       colorLabel_;
+    Real              arrowLength_ = 0;
+    bool              normalize_   = false;
+    std::vector<Real> x_, y_, z_, vx_, vy_, vz_;
+};
+
+enum class Scalar3DStyle {
+    Faces,    // видимые грани параллелепипеда, раскрашенные по значению
+    Scatter,  // облако точек всей сетки, раскрашенных по значению
+};
+
+// Скалярное поле в 3D на регулярной сетке nx x ny x nz. Раскладка — как у TensorBasis<3>:
+// values[i + nx * (j + ny * k)] — значение в точке (x[i], y[j], z[k]).
+class ScalarFigure3D {
+public:
+    explicit ScalarFigure3D(std::string title = {});
+
+    ScalarFigure3D& setTitle(std::string title);
+    ScalarFigure3D& setXLabel(std::string label);
+    ScalarFigure3D& setYLabel(std::string label);
+    ScalarFigure3D& setZLabel(std::string label);
+    ScalarFigure3D& setColorLabel(std::string label);
+    ScalarFigure3D& setStyle(Scalar3DStyle style);
+
+    ScalarFigure3D& setField(std::span<const Real> x, std::span<const Real> y, std::span<const Real> z,
+                             std::span<const Real> values);
+
+    // Значения f(const Point<3>&) на равномерной сетке n x n x n параллелепипеда [lower, upper].
+    template <class F>
+    ScalarFigure3D& setFunction(F&& f, const Point<3>& lower, const Point<3>& upper, int n);
+
+    std::string toJson() const;
+    void saveJson(const std::filesystem::path& path) const;
+    bool render(const std::filesystem::path& dataFile, const RenderOptions& options = {}) const;
+
+private:
+    std::string       title_;
+    std::string       xLabel_ = "$x$";
+    std::string       yLabel_ = "$y$";
+    std::string       zLabel_ = "$z$";
+    std::string       colorLabel_;
+    Scalar3DStyle     style_ = Scalar3DStyle::Faces;
+    std::vector<Real> x_, y_, z_, values_;
+};
+
+template <class F>
+ScalarFigure3D& ScalarFigure3D::setFunction(F&& f, const Point<3>& lower, const Point<3>& upper,
+                                            int n) {
+    if (n < 2) {
+        throw std::invalid_argument("ScalarFigure3D::setFunction: at least 2 points per direction");
+    }
+    std::array<std::vector<Real>, 3> axes;
+    for (std::size_t d = 0; d < 3; ++d) {
+        for (int i = 0; i < n; ++i) {
+            axes[d].push_back(lower[d] + (upper[d] - lower[d]) * static_cast<Real>(i) /
+                                             static_cast<Real>(n - 1));
+        }
+    }
+    std::vector<Real> values;
+    values.reserve(static_cast<std::size_t>(n) * static_cast<std::size_t>(n) * static_cast<std::size_t>(n));
+    for (const Real zk : axes[2]) {
+        for (const Real yj : axes[1]) {
+            for (const Real xi : axes[0]) {
+                values.push_back(f(Point<3>{xi, yj, zk}));
+            }
+        }
+    }
+    return setField(axes[0], axes[1], axes[2], values);
+}
+
+template <class F>
+VectorFigure3D& VectorFigure3D::setFunction(F&& f, const Point<3>& lower, const Point<3>& upper,
+                                            int n) {
+    if (n < 2) {
+        throw std::invalid_argument("VectorFigure3D::setFunction: at least 2 points per direction");
+    }
+    std::vector<Real> x, y, z, vx, vy, vz;
+    Real minStep = 0;
+    for (std::size_t d = 0; d < 3; ++d) {
+        const Real step = (upper[d] - lower[d]) / static_cast<Real>(n - 1);
+        minStep = d == 0 ? step : std::min(minStep, step);
+    }
+    const auto coordinate = [&](std::size_t d, int i) {
+        return lower[d] + (upper[d] - lower[d]) * static_cast<Real>(i) / static_cast<Real>(n - 1);
+    };
+    for (int k = 0; k < n; ++k) {
+        for (int j = 0; j < n; ++j) {
+            for (int i = 0; i < n; ++i) {
+                const Point<3> p{coordinate(0, i), coordinate(1, j), coordinate(2, k)};
+                const Point<3> v = f(p);
+                x.push_back(p[0]);
+                y.push_back(p[1]);
+                z.push_back(p[2]);
+                vx.push_back(v[0]);
+                vy.push_back(v[1]);
+                vz.push_back(v[2]);
+            }
+        }
+    }
+    if (!(arrowLength_ > 0)) {
+        arrowLength_ = Real(0.9) * minStep;
+    }
+    return setVectors(x, y, z, vx, vy, vz);
+}
 
 template <class F>
 Figure2D::Field Figure2D::sample(F&& f, Real x0, Real x1, Real y0, Real y1, int nx, int ny,
