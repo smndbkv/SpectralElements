@@ -8,6 +8,13 @@ target_link_libraries(example_approximation_1d PRIVATE sem::sem)
 add_executable(example_approximation_4d approximation_4d.cpp)
 target_link_libraries(example_approximation_4d PRIVATE sem::sem)
 
+add_executable(example_laplace_3d laplace_3d.cpp)
+target_link_libraries(example_laplace_3d PRIVATE sem::sem)
+
+add_executable(example_laplace_caverna_3d laplace_caverna_3d.cpp)
+target_link_libraries(example_laplace_caverna_3d PRIVATE sem::sem)
+
+
 # Картинки для README: примеры запускаются без окон прямо в папке docs/images.
 #   cmake --build --preset release --target docs_images
 set(SEM_DOCS_IMAGES_DIR ${PROJECT_SOURCE_DIR}/docs/images)
