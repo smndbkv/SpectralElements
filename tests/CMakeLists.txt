@@ -21,6 +21,7 @@ add_executable(sem_tests
     test_timer.cpp
     test_operators.cpp
     test_solvers.cpp
+    test_mesh.cpp
 )
 target_link_libraries(sem_tests PRIVATE sem::sem Catch2::Catch2WithMain)
 
