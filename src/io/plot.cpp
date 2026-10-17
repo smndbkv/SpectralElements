@@ -575,6 +575,119 @@ bool ScalarFigure3D::render(const std::filesystem::path& dataFile, const RenderO
     return renderJson(toJson(), dataFile, options, "sem::io::ScalarFigure3D::render");
 }
 
+// ---------------------------------------------------------------------------
+// Animation2D
+// ---------------------------------------------------------------------------
+
+Animation2D::Animation2D(std::string title) : title_(std::move(title)) {}
+
+Animation2D& Animation2D::setTitle(std::string title) {
+    title_ = std::move(title);
+    return *this;
+}
+
+Animation2D& Animation2D::setXLabel(std::string label) {
+    xLabel_ = std::move(label);
+    return *this;
+}
+
+Animation2D& Animation2D::setYLabel(std::string label) {
+    yLabel_ = std::move(label);
+    return *this;
+}
+
+Animation2D& Animation2D::setColorLabel(std::string label) {
+    colorLabel_ = std::move(label);
+    return *this;
+}
+
+Animation2D& Animation2D::setStyle(FieldStyle style) {
+    style_ = style;
+    return *this;
+}
+
+Animation2D& Animation2D::setFramesPerSecond(Real fps) {
+    if (!(fps > 0)) {
+        throw std::invalid_argument("Animation2D::setFramesPerSecond: fps must be positive");
+    }
+    fps_ = fps;
+    return *this;
+}
+
+Animation2D& Animation2D::setIsolines(int count) {
+    if (count < 0) {
+        throw std::invalid_argument("Animation2D::setIsolines: count must be non-negative");
+    }
+    isolines_ = count;
+    return *this;
+}
+
+Animation2D& Animation2D::setGrid(std::span<const Real> x, std::span<const Real> y) {
+    if (x.size() < 2 || y.size() < 2) {
+        throw std::invalid_argument("Animation2D::setGrid: at least 2 points per direction");
+    }
+    x_.assign(x.begin(), x.end());
+    y_.assign(y.begin(), y.end());
+    frames_.clear();
+    labels_.clear();
+    return *this;
+}
+
+Animation2D& Animation2D::addFrame(std::span<const Real> z, std::string label) {
+    if (x_.empty()) {
+        throw std::invalid_argument("Animation2D::addFrame: call setGrid first");
+    }
+    if (z.size() != x_.size() * y_.size()) {
+        throw std::invalid_argument("Animation2D::addFrame: z must hold nx * ny values");
+    }
+    frames_.emplace_back(z.begin(), z.end());
+    labels_.push_back(std::move(label));
+    return *this;
+}
+
+std::string Animation2D::toJson() const {
+    std::string out = "{\n  \"kind\": \"animation2d\",\n  \"title\": ";
+    appendString(out, title_);
+    out += ",\n  \"xlabel\": ";
+    appendString(out, xLabel_);
+    out += ",\n  \"ylabel\": ";
+    appendString(out, yLabel_);
+    out += ",\n  \"zlabel\": ";
+    appendString(out, colorLabel_);
+    out += ",\n  \"style\": ";
+    appendString(out, fieldStyleName(style_));
+    out += ",\n  \"fps\": ";
+    appendNumber(out, fps_);
+    out += ",\n  \"isolines\": " + std::to_string(isolines_);
+    out += ",\n  \"x\": ";
+    appendArray(out, x_);
+    out += ",\n  \"y\": ";
+    appendArray(out, y_);
+    out += ",\n  \"labels\": [";
+    for (std::size_t f = 0; f < labels_.size(); ++f) {
+        out += f == 0 ? "" : ", ";
+        appendString(out, labels_[f]);
+    }
+    out += "],\n  \"frames\": [";
+    for (std::size_t f = 0; f < frames_.size(); ++f) {
+        out += f == 0 ? "\n    " : ",\n    ";
+        appendArray(out, frames_[f]);
+    }
+    out += frames_.empty() ? "]\n}\n" : "\n  ]\n}\n";
+    return out;
+}
+
+void Animation2D::saveJson(const std::filesystem::path& path) const {
+    writeTextFile(path, toJson(), "Animation2D::saveJson");
+}
+
+bool Animation2D::render(const std::filesystem::path& dataFile, const RenderOptions& options) const {
+    if (frames_.empty()) {
+        throw std::invalid_argument("Animation2D::render: no frames, call addFrame");
+    }
+    return renderJson(toJson(), dataFile, options, "sem::io::Animation2D::render");
+}
+
 bool renderAll(std::span<const PlotItem> items, bool showWindow) {
     return renderItems(items, showWindow, "sem::io::renderAll");
 }

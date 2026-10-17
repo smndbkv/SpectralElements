@@ -45,6 +45,18 @@
       "values": [nx * ny * nz значений, values[i + nx * (j + ny * k)] — в точке (x[i], y[j], z[k])]
     }
 
+Формат анимации поля (Animation2D):
+    {
+      "kind": "animation2d",
+      "title": "...", "xlabel": "...", "ylabel": "...", "zlabel": "...",
+      "style": "heatmap" | "contour" | "surface",
+      "fps": 20,                            (кадров в секунду)
+      "isolines": 0,                        (линий уровня поверх цветовой карты; 0 — без них)
+      "x": [nx значений], "y": [ny значений],
+      "labels": ["...", ...],               (подпись кадра, дописывается к заголовку)
+      "frames": [[nx * ny значений], ...]   (раскладка как у Figure2D)
+    }
+    Сохраняется как .gif (Pillow) или .mp4 (нужен ffmpeg); в окне проигрывается по кругу.
 """
 
 import argparse
@@ -248,6 +260,154 @@ def draw_scalar3d(data, fig):
     ax.set_box_aspect((np.ptp(x) or 1, np.ptp(y) or 1, np.ptp(z) or 1))
 
 
+class Movie:
+    """Анимация поля, нарисованная на фигуре: update(k) переводит фигуру на кадр k."""
+
+    def __init__(self, fig, update, count, fps, blit):
+        self.fig = fig
+        self.update = update  # update(k) -> список меняющихся артистов (для blitting)
+        self.count = count
+        self.fps = fps
+        self.blit = blit  # True: меняющиеся артисты помечены animated, фон рисуется один раз
+
+
+def draw_animation(data, fig):
+    """Анимация поля (Animation2D) на фигуре fig; возвращает Movie."""
+    import numpy as np
+    from matplotlib import cm
+    from matplotlib.colors import Normalize
+
+    x = np.asarray(data["x"], dtype=float)
+    y = np.asarray(data["y"], dtype=float)
+    frames = np.asarray(data["frames"], dtype=float).reshape(-1, len(y), len(x))
+    labels = data.get("labels") or []
+    X, Y = np.meshgrid(x, y)
+
+    # Общая шкала для всех кадров.
+    vmin, vmax = float(np.nanmin(frames)), float(np.nanmax(frames))
+    if vmin == vmax:
+        vmin, vmax = vmin - 1, vmax + 1
+    levels = np.linspace(vmin, vmax, 31)
+    isolines = int(data.get("isolines", 0) or 0)
+    iso_levels = np.linspace(vmin, vmax, isolines + 2)[1:-1] if isolines > 0 else None
+    style = data.get("style", "heatmap")
+    cmap = "viridis"
+    surface = style == "surface"
+
+    if surface:
+        ax = fig.add_subplot(projection="3d")
+        ax.set_zlim(vmin, vmax)
+        ax.set_zlabel(data.get("zlabel", ""))
+        label_text = ax.text2D(0.02, 0.95, "", transform=ax.transAxes)
+    else:
+        ax = fig.add_subplot()
+        ax.set_aspect("equal")
+        # Подпись кадра — внутри осей: при blitting обновляется только область осей.
+        label_text = ax.text(0.02, 0.97, "", transform=ax.transAxes, va="top", ha="left",
+                             bbox=dict(boxstyle="round", facecolor="white", alpha=0.8))
+    ax.set_title(data.get("title", ""))
+    ax.set_xlabel(data.get("xlabel", ""))
+    ax.set_ylabel(data.get("ylabel", ""))
+
+    mesh = None
+    if style == "heatmap":
+        mesh = ax.pcolormesh(X, Y, frames[0], shading="auto", cmap=cmap, vmin=vmin, vmax=vmax)
+    fig.colorbar(cm.ScalarMappable(norm=Normalize(vmin=vmin, vmax=vmax), cmap=cmap), ax=ax,
+                 label=data.get("zlabel", ""), shrink=0.8)
+
+    # Артисты, которые создаются заново на каждом кадре (у heatmap меняются только значения).
+    created = []
+
+    def update(k):
+        for artist in created:
+            artist.remove()
+        created.clear()
+        z = frames[k]
+        if mesh is not None:
+            mesh.set_array(z.ravel())
+        if surface:
+            created.append(ax.plot_surface(X, Y, z, cmap=cmap, vmin=vmin, vmax=vmax,
+                                           linewidth=0, antialiased=True))
+        elif style == "contour":
+            created.append(ax.contourf(X, Y, z, levels=levels, cmap=cmap))
+        if iso_levels is not None and not surface:
+            created.append(ax.contour(X, Y, z, levels=iso_levels, colors="white",
+                                      linewidths=0.7, alpha=0.8))
+        label_text.set_text(labels[k] if k < len(labels) else "")
+        artists = ([mesh] if mesh is not None else []) + created + [label_text]
+        if not surface:
+            for artist in artists:
+                artist.set_animated(True)  # не входит в фон, рисуется отдельно на каждом кадре
+        return artists
+
+    update(0)
+    # Раскладка считается один раз по первому кадру и дальше не меняется.
+    fig.canvas.draw()
+    fig.set_layout_engine("none")
+    # 3D-поверхность перерисовывается целиком: у неё меняется и проекция всей сцены.
+    return Movie(fig, update, len(frames), float(data.get("fps", 20) or 20), blit=not surface)
+
+
+def play_animation(movie):
+    """FuncAnimation для окна (проигрывается по кругу); на неё нужно держать ссылку до plt.show."""
+    import matplotlib.pyplot as plt
+    from matplotlib.animation import FuncAnimation
+
+    class WindowAnimation(FuncAnimation):
+        """Останавливается сама, как только окно закрыто.
+
+        Обычно FuncAnimation останавливается по close_event, но в Tk он приходит с задержкой:
+        фигура сразу убирается из pyplot и получает пустой холст, а окно уничтожается позже.
+        Если таймер успевает сработать в этом промежутке, blitting падает с
+        AttributeError: 'FigureCanvasBase' object has no attribute 'copy_from_bbox'.
+        """
+
+        def _step(self, *args):
+            if not plt.fignum_exists(movie.fig.number):
+                self.event_source.stop()
+                return False  # таймер удаляет callback, вернувший False
+            return super()._step(*args)
+
+    return WindowAnimation(movie.fig, movie.update, frames=movie.count, interval=1000 / movie.fps,
+                           repeat=True, blit=movie.blit)
+
+
+def save_animation(movie, output):
+    """.gif — кадры рисуются вручную и склеиваются Pillow (ставится вместе с matplotlib);
+    остальные форматы (.mp4) — через matplotlib и ffmpeg.
+
+    Свой цикл вместо FuncAnimation.save: тот перерисовывает всю фигуру (оси, подписи,
+    шкалу) по несколько раз на кадр, а здесь неизменный фон рисуется один раз
+    и на каждом кадре поверх него — только меняющиеся артисты.
+    """
+    import numpy as np
+    from matplotlib.animation import FuncAnimation
+    from PIL import Image
+
+    if output.suffix.lower() != ".gif":
+        FuncAnimation(movie.fig, movie.update, frames=movie.count, blit=False).save(output, fps=movie.fps)
+        return
+
+    canvas = movie.fig.canvas
+    background = None
+    if movie.blit:
+        canvas.draw()  # меняющиеся артисты помечены animated и в фон не попадают
+        background = canvas.copy_from_bbox(movie.fig.bbox)
+    images = []
+    for k in range(movie.count):
+        artists = movie.update(k)
+        if movie.blit:
+            canvas.restore_region(background)
+            for artist in artists:
+                movie.fig.draw_artist(artist)
+        else:
+            canvas.draw()
+        images.append(Image.fromarray(np.asarray(canvas.buffer_rgba())).convert("RGB"))
+    images[0].save(output, save_all=True, append_images=images[1:],
+                   duration=round(1000 / movie.fps), loop=0)
+    movie.update(0)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Draw sem::io::Figure / Figure2D JSON files.")
     parser.add_argument("data", type=Path, nargs="+",
@@ -272,8 +432,19 @@ def main(argv=None):
     import matplotlib.pyplot as plt
 
     # Каждый файл — отдельная фигура; plt.show() в конце открывает все окна сразу.
+    animations = []  # без ссылки на FuncAnimation анимация остановится (сборщик мусора)
     for path, output in zip(args.data, outputs):
         data = load(path)
+        if data.get("kind") == "animation2d":
+            surface = data.get("style") == "surface"
+            fig = plt.figure(figsize=(7, 6) if surface else (7, 5.6), layout="constrained")
+            movie = draw_animation(data, fig)
+            if output is not None:
+                save_animation(movie, output)
+                print(f"Saved {output}")
+            if not args.no_show:
+                animations.append(play_animation(movie))
+            continue
         if data.get("kind") == "field2d":
             fig = plt.figure(figsize=(8, 6.5), layout="constrained")
             draw_field(data, fig)

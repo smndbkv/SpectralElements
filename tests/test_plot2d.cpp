@@ -134,6 +134,42 @@ TEST_CASE("ScalarFigure3D: invalid arguments", "[io][plot]") {
                     std::invalid_argument);  // нет данных
 }
 
+TEST_CASE("Animation2D: JSON with grid, frames and labels", "[io][plot]") {
+    const std::vector<Real> x{0, 1}, y{0, 1, 2};
+    sem::io::Animation2D movie("u");
+    movie.setColorLabel("$u$").setIsolines(5).setFramesPerSecond(10).setGrid(x, y);
+    movie.addFrame(std::vector<Real>{1, 2, 3, 4, 5, 6}, "$t = 0$")
+         .addFrame(std::vector<Real>{0, 0, 0, 0, 0, 1}, "$t = 1$");
+    CHECK(movie.numFrames() == 2);
+
+    const std::string json = movie.toJson();
+    CHECK(contains(json, R"("kind": "animation2d")"));
+    CHECK(contains(json, R"("style": "heatmap")"));
+    CHECK(contains(json, R"("fps": 10)"));
+    CHECK(contains(json, R"("isolines": 5)"));
+    CHECK(contains(json, R"("y": [0, 1, 2])"));
+    CHECK(contains(json, R"("labels": ["$t = 0$", "$t = 1$"])"));
+    CHECK(contains(json, "[1, 2, 3, 4, 5, 6]"));
+    CHECK(contains(json, "[0, 0, 0, 0, 0, 1]"));
+
+    // Новая сетка удаляет старые кадры.
+    movie.setGrid(x, x);
+    CHECK(movie.numFrames() == 0);
+}
+
+TEST_CASE("Animation2D: invalid arguments", "[io][plot]") {
+    const std::vector<Real> x{0, 1}, one{0};
+    sem::io::Animation2D movie;
+    CHECK_THROWS_AS(movie.addFrame(std::vector<Real>(4)), std::invalid_argument);  // нет сетки
+    CHECK_THROWS_AS(movie.setGrid(one, x), std::invalid_argument);
+    movie.setGrid(x, x);
+    CHECK_THROWS_AS(movie.addFrame(std::vector<Real>(3)), std::invalid_argument);  // нужно 4
+    CHECK_THROWS_AS(movie.setFramesPerSecond(0), std::invalid_argument);
+    CHECK_THROWS_AS(movie.setIsolines(-1), std::invalid_argument);
+    CHECK_THROWS_AS(movie.render("unused.json", {.image = "unused.gif", .showWindow = false}),
+                    std::invalid_argument);  // нет кадров
+}
+
 TEST_CASE("renderAll: invalid arguments", "[io][plot]") {
     using sem::io::PlotItem;
     const std::vector<PlotItem> none;

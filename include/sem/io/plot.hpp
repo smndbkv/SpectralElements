@@ -254,6 +254,53 @@ private:
     std::vector<Real> x_, y_, z_, values_;
 };
 
+// Анимация скалярного поля z(x, y, t): последовательность кадров на одной сетке nx x ny,
+// раскладка каждого кадра — та же, что у Figure2D: z[i + nx * j] — значение в точке (x[i], y[j]).
+// В окне matplotlib проигрывается по кругу; в файл сохраняется как .gif (Pillow, ставится
+// вместе с matplotlib) или .mp4 (нужен ffmpeg).
+// Шкала цвета (и ось z у поверхности) общая для всех кадров — от минимума до максимума
+// по всем кадрам, поэтому видно, как меняется амплитуда.
+//
+//   sem::io::Animation2D movie("Heat equation");
+//   movie.setGrid(x, y);
+//   for (...) movie.addFrame(values, "$t = 0.01$");  // подпись дописывается к заголовку
+//   sem::io::renderAll(std::vector<sem::io::PlotItem>{{movie.toJson(), "movie.json", "movie.gif"}});
+class Animation2D {
+public:
+    explicit Animation2D(std::string title = {});
+
+    Animation2D& setTitle(std::string title);
+    Animation2D& setXLabel(std::string label);
+    Animation2D& setYLabel(std::string label);
+    Animation2D& setColorLabel(std::string label);
+    Animation2D& setStyle(FieldStyle style);
+    Animation2D& setFramesPerSecond(Real fps);
+    // Число линий уровня поверх цветовой карты (уровни общие для всех кадров); 0 — без них.
+    Animation2D& setIsolines(int count);
+
+    // Сетка задаётся до кадров; смена сетки удаляет уже добавленные кадры.
+    Animation2D& setGrid(std::span<const Real> x, std::span<const Real> y);
+    Animation2D& addFrame(std::span<const Real> z, std::string label = {});
+
+    std::size_t numFrames() const { return frames_.size(); }
+
+    std::string toJson() const;
+    void saveJson(const std::filesystem::path& path) const;
+    bool render(const std::filesystem::path& dataFile, const RenderOptions& options = {}) const;
+
+private:
+    std::string                    title_;
+    std::string                    xLabel_ = "$x$";
+    std::string                    yLabel_ = "$y$";
+    std::string                    colorLabel_;
+    FieldStyle                     style_    = FieldStyle::Heatmap;
+    Real                           fps_      = 20;
+    int                            isolines_ = 0;
+    std::vector<Real>              x_, y_;
+    std::vector<std::vector<Real>> frames_;
+    std::vector<std::string>       labels_;
+};
+
 template <class F>
 ScalarFigure3D& ScalarFigure3D::setFunction(F&& f, const Point<3>& lower, const Point<3>& upper,
                                             int n) {
