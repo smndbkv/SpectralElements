@@ -14,6 +14,8 @@ target_link_libraries(example_laplace_3d PRIVATE sem::sem)
 add_executable(example_laplace_caverna_3d laplace_caverna_3d.cpp)
 target_link_libraries(example_laplace_caverna_3d PRIVATE sem::sem)
 
+add_executable(example_heat_equation_2d heat_equation_2d.cpp)
+target_link_libraries(example_heat_equation_2d PRIVATE sem::sem)
 
 # Картинки для README: примеры запускаются без окон прямо в папке docs/images.
 #   cmake --build --preset release --target docs_images
